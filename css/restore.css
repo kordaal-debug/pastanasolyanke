@@ -25,3 +25,8 @@ section.menu-major[id]{scroll-margin-top:200px}@media(max-width:700px){section.m
 .tavola-closing>*{min-width:0}section.tavola-story[id],section.tavola-closing[id]{scroll-margin-top:114px}@media(max-width:700px){.tavola-closing h2{font-size:17vw}.tavola-closing .pill{gap:20px;padding:17px 20px}section.tavola-story[id],section.tavola-closing[id]{scroll-margin-top:88px}}
 
 #tavola-book{scroll-margin-top:114px}@media(max-width:700px){#tavola-book{scroll-margin-top:88px}}
+
+/* Booking failures must stay readable instead of disappearing inside a collapsed slot list. */
+.remarked-primary-widget .remarked-primary-widget__request-notice{width:100%;padding:14px 16px;margin:12px 0;line-height:1.5;border:1px solid #aa3826;border-radius:12px;color:#4a4a4a;background:#fff7f0;font-size:14px}
+.remarked-primary-widget .remarked-primary-widget__request-notice button{font:inherit;color:#8d2c1d;background:#fff;border:1px solid currentColor;border-radius:6px;padding:7px 10px;margin:6px 4px;cursor:pointer}
+.remarked-primary-widget .remarked-primary-widget__request-notice a{color:#8d2c1d;white-space:nowrap}
