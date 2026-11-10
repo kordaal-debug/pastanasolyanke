@@ -7,6 +7,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let ready = false;
   try {
     if (typeof window.widgetArea === 'function') {
+      // ReMarked checks the referring domain. Send only the origin, never the page path or query.
+      const referrerPolicy = document.querySelector('meta[name="referrer"]');
+      if (referrerPolicy?.content.trim().toLowerCase() === 'no-referrer') {
+        referrerPolicy.content = 'strict-origin';
+      }
       window.widgetArea({ booking: [{name:'Pasta на Солянке',point:447091}], button:'[href="#openReMarkedWidget"]',email:true,phoneMask:true,rangeSlotsTime:true,blockedOpenTime:true,blockedAutoLanding:true,utmSourceToReserveSource:true,errorColor:'red',showErrorNoticeValidate:true,linkPolicy:'https://remarked.ru/widget/new/css/privancy.html',qtyMax:10 });
       ready = true;
     }
