@@ -26,6 +26,9 @@ function widgetArea(params) {
   let remarkedTokenPoint = null;
   let remarkedTokenLoading = false;
   let remarkedTokenRequest = 0;
+  let remarkedTimesRequest = 0;
+  let reserveRequestPending = false;
+  let reserveOutcomeUncertain = false;
   let dateBool = true;
   let lang = document.querySelector('html').getAttribute('lang');
 
@@ -1115,6 +1118,7 @@ function widgetArea(params) {
     const tokenRequest = ++remarkedTokenRequest;
     remarkedTokenLoading = true;
     remarkedTokenPoint = null;
+    remarkedToken = undefined;
 
     const remarkedBody = {
       method: 'GetToken',
@@ -1128,17 +1132,31 @@ function widgetArea(params) {
     remarkedXHR.open('POST', remarkedReqUrl);
 
     remarkedXHR.responseType = 'json';
+    remarkedXHR.timeout = 15000;
     remarkedXHR.setRequestHeader('Content-Type', 'application/json');
+
+    const tokenFailed = function () {
+      if (tokenRequest !== remarkedTokenRequest) return;
+      remarkedTokenLoading = false;
+      remarkedToken = undefined;
+      endPreloader();
+      showTimeLoadError('Не удалось подключиться к сервису бронирования.', function () {
+        getToken(selectedWidgetPoint());
+      });
+    };
 
     remarkedXHR.onload = async function () {
       if (tokenRequest !== remarkedTokenRequest) {
         return false;
       }
-      if (!remarkedXHR.response || remarkedXHR.response.status == "error") {
-        endPreloader(); // Добавляем вызов endPreloader в случае ошибки
-        return false;
+      if (remarkedXHR.status < 200 || remarkedXHR.status >= 300 ||
+          !remarkedXHR.response?.token || remarkedXHR.response.status == "error") {
+        tokenFailed();
+        return;
       }
       remarkedToken = remarkedXHR.response.token;
+      remarkedTokenLoading = false;
+      remarkedTokenPoint = String(point);
       if (options.tags) {
         getTags();
       }
@@ -1146,34 +1164,27 @@ function widgetArea(params) {
         getEventTags();
       }
 
-      await checkFreeDates();
+      try {
+        await checkFreeDates();
+      } catch (error) {
+        tokenFailed();
+        return;
+      }
+      if (tokenRequest !== remarkedTokenRequest) return;
 
       if (remarkedPrimaryWidget.querySelector('.remarked-primary-widget__date-select').value != "") {
         getTimes();
       } else {
+        const times = remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times');
+        times.classList.remove('remarked-primary-widget__times--active');
+        times.querySelector('.remarked-primary-widget__times-wrap').replaceChildren();
         endPreloader();
       }
     }
 
-    remarkedXHR.onreadystatechange = function () {
-      if (remarkedXHR.readyState == 4) {
-        if (tokenRequest !== remarkedTokenRequest) {
-          return;
-        }
-        remarkedToken = remarkedXHR.response?.token;
-        remarkedTokenLoading = false;
-        remarkedTokenPoint = remarkedToken ? String(point) : null;
-        //remarkedPrimaryWidget.querySelector('.remarked-primary-widget__date-select').value = "none";
-      }
-    }
-    remarkedXHR.onerror = function() { // Добавляем обработчик ошибок для XHR
-      if (tokenRequest !== remarkedTokenRequest) {
-        return;
-      }
-      remarkedTokenLoading = false;
-      endPreloader();
-      console.error('XHR request failed in getToken');
-    };
+    remarkedXHR.onerror = tokenFailed;
+    remarkedXHR.ontimeout = tokenFailed;
+    remarkedXHR.onabort = tokenFailed;
     remarkedXHR.send(remarkedBodyJSON);
   }
 
@@ -1667,6 +1678,65 @@ function widgetArea(params) {
     }
   }
 
+  function showTimeLoadError(message, retry = getTimes) {
+    const times = remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times');
+    if (!times) return;
+    times.classList.add('remarked-primary-widget__times--active');
+    times.querySelector('.remarked-primary-widget__times-input').value = '';
+    const content = times.querySelector('.remarked-primary-widget__times-wrap');
+    content.replaceChildren();
+    const notice = document.createElement('p');
+    notice.className = 'remarked-primary-widget__request-notice';
+    notice.setAttribute('role', 'status');
+    notice.textContent = message + ' ';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Повторить загрузку';
+    button.addEventListener('click', retry);
+    const phone = document.createElement('a');
+    phone.href = 'tel:+79254477317';
+    phone.textContent = '+7 (925) 447-73-17';
+    notice.append(button, document.createTextNode(' или позвоните: '), phone);
+    content.append(notice);
+    times.querySelector('.remarked-primary-widget__times-notice').style.opacity = 0;
+  }
+
+  function showReserveNotice(message, uncertain = false) {
+    let notice = remarkedPrimaryWidget.querySelector('.remarked-primary-widget__reserve-notice');
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.className = 'remarked-primary-widget__request-notice remarked-primary-widget__reserve-notice';
+      notice.setAttribute('role', 'status');
+      remarkedPrimaryWidget.querySelector('.remarked-primary-widget__submit-wrap').before(notice);
+    }
+    notice.textContent = message;
+    if (uncertain) {
+      const phone = document.createElement('a');
+      phone.href = 'tel:+79254477317';
+      phone.textContent = '+7 (925) 447-73-17';
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'remarked-primary-widget__confirm-retry';
+      retry.textContent = 'Я проверил(а), брони нет';
+      retry.addEventListener('click', function () {
+        reserveOutcomeUncertain = false;
+        remarkedPrimaryWidget.querySelector('.remarked-primary-widget__submit').setAttribute('data-disabled', 'false');
+        notice.remove();
+        // Confirmation only unlocks the form. It never resends a reservation.
+      });
+      notice.append(document.createTextNode(' '), phone, document.createTextNode(' '), retry);
+    }
+    notice.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  function reserveResponseMissing() {
+    reserveRequestPending = false;
+    reserveOutcomeUncertain = true;
+    endPreloader();
+    remarkedPrimaryWidget.querySelector('.remarked-primary-widget__submit').setAttribute('data-disabled', 'true');
+    showReserveNotice('Не удалось получить подтверждение от сервиса. Бронь могла быть создана. Не отправляйте заявку повторно, пока не проверите её у ресторана.', true);
+  }
+
   function clickerTimeSlot(div, text) {
     if (div.classList.contains('remarked-primary-widget__times-item--active')) return;
     //console.log(div, text);
@@ -1831,9 +1901,15 @@ function widgetArea(params) {
   }
 
   async function getTimes() {
+    const timesRequest = ++remarkedTimesRequest;
+    const times = remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times');
+    const timeInput = times.querySelector('.remarked-primary-widget__times-input');
+    timeInput.value = '';
+    ['data-table', 'data-duration', 'data-reserve-date'].forEach(name => timeInput.removeAttribute(name));
+    times.querySelector('.remarked-primary-widget__times-wrap').replaceChildren();
     // A fast date selection can precede GetToken. Its onload retries getTimes.
     if (!remarkedToken && remarkedTokenLoading) return;
-    if (!remarkedToken) { endPreloader(); return; }
+    if (!remarkedToken) { getToken(selectedWidgetPoint()); return; }
     startPreloader();
     if (options.useCustomGetTimes) {
       await options.customGetTimes(remarkedToken, remarkedPrimaryWidget, remarkedReqUrl);
@@ -1900,9 +1976,12 @@ function widgetArea(params) {
       remarkedXHRDays.open('POST', remarkedReqUrl);
 
       remarkedXHRDays.responseType = 'json';
+      remarkedXHRDays.timeout = 15000;
       remarkedXHRDays.setRequestHeader('Content-Type', 'application/json');
 
       remarkedXHRDays.onload = async function () {
+        if (timesRequest !== remarkedTimesRequest) return;
+        try {
 
         remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times').classList.add('remarked-primary-widget__times--active');
         remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-input').value = "";
@@ -1931,9 +2010,11 @@ function widgetArea(params) {
         //   }
         // }
 
-        if (!remarkedXHRDays.response || remarkedXHRDays.response.status === 'error') {
+        if (remarkedXHRDays.status < 200 || remarkedXHRDays.status >= 300 ||
+            !remarkedXHRDays.response || remarkedXHRDays.response.status === 'error' ||
+            (options.rangeSlotsTime && !Array.isArray(remarkedXHRDays.response.slots))) {
           endPreloader();
-          remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-wrap').innerHTML = '<p role="status">Не удалось загрузить время. Повторите выбор даты или позвоните: <a href="tel:+79254477317">+7 (925) 447-73-17</a>.</p>';
+          showTimeLoadError('Не удалось загрузить свободное время.');
           return;
         }
         let slots = remarkedXHRDays.response.slots;
@@ -2770,12 +2851,20 @@ function widgetArea(params) {
           options.afterRenderSlots(remarkedPrimaryWidget, options);
         }
         endPreloader();
+        } catch (error) {
+          endPreloader();
+          showTimeLoadError('Не удалось загрузить свободное время.');
+        }
       }
 
-      remarkedXHRDays.onerror = function() { // Добавляем обработчик ошибок для XHR
+      const timesFailed = function() {
+        if (timesRequest !== remarkedTimesRequest) return;
         endPreloader();
-        console.error('XHR request failed in getTimes');
+        showTimeLoadError('Не удалось загрузить свободное время.');
       };
+      remarkedXHRDays.onerror = timesFailed;
+      remarkedXHRDays.ontimeout = timesFailed;
+      remarkedXHRDays.onabort = timesFailed;
 
       remarkedXHRDays.send(remarkedGetDaysJSON);
     } else {
@@ -2784,9 +2873,6 @@ function widgetArea(params) {
     }
   }
 
-  document.querySelector('.remarked-primary-widget__title').addEventListener('click', function () {
-    console.log(remarkedToken);
-  });
   if (remarkedPrimaryWidget.querySelector('.remarked-primary-widget__restaurant-select')) {
     remarkedPrimaryWidget.querySelector('.remarked-primary-widget__restaurant-select').addEventListener('change', function () {
       remarkedPrimaryWidget.querySelector('.remarked-primary-widget__restaurant-select').style.removeProperty('border-color');
@@ -2850,10 +2936,13 @@ function widgetArea(params) {
         remarkedPrimaryWidget.querySelector('.qs-active').classList.remove('qs-active');
         return;
       }
-      options.changeDateCalendarBefore(remarkedPrimaryWidget, input.value, options, dateReplacer);
+      options.changeDateCalendarBefore(remarkedPrimaryWidget, calendar.value, options, dateReplacer);
       if (instance.dateSelected != undefined) {
         getTimes();
       } else {
+        remarkedTimesRequest++;
+        remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-input').value = '';
+        endPreloader();
         if (remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times--active')) {
           remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times--active').classList.remove('remarked-primary-widget__times--active');
         }
@@ -3153,6 +3242,7 @@ function widgetArea(params) {
   const EMAIL_REGEXP = /^(([^<>()[\].,;:\s@"]+(\.[^<>()[\].,;:\s@"]+)*)|(".+"))@(([^<>()[\].,;:\s@"]+\.)+[^<>()[\].,;:\s@"]{2,})$/iu;
 
   remarkedPrimaryWidget.querySelector('.remarked-primary-widget__submit').addEventListener('click', function () {
+    if (reserveRequestPending || reserveOutcomeUncertain) return false;
     if (this.getAttribute('data-disabled') && JSON.parse(this.getAttribute('data-disabled'))) return false;
     this.setAttribute('data-disabled', 'true');
     let time = remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-input');
@@ -3252,6 +3342,7 @@ function widgetArea(params) {
       }
       return false;
     } else if (time.value == "" && options.time) {
+      remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times').classList.add('remarked-primary-widget__times--active');
       remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-notice').style.opacity = '1';
       remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-notice').scrollIntoView({ block: "center", behavior: "smooth" });
       this.setAttribute('data-disabled', 'false');
@@ -3334,7 +3425,11 @@ function widgetArea(params) {
         }
       }
 
-      sendReserveRemarked();
+      try {
+        sendReserveRemarked();
+      } catch (error) {
+        reserveResponseMissing();
+      }
     }
   });
 
@@ -3428,6 +3523,8 @@ function widgetArea(params) {
   }
 
   function sendReserveRemarked() {
+    reserveRequestPending = true;
+    remarkedPrimaryWidget.querySelector('.remarked-primary-widget__reserve-notice')?.remove();
     startPreloader();
 
     let hours = new Date().getHours();
@@ -3729,13 +3826,26 @@ function widgetArea(params) {
     remarkedXHRRoom.open('POST', remarkedReqUrl);
 
     remarkedXHRRoom.responseType = 'json';
+    remarkedXHRRoom.timeout = 30000;
     remarkedXHRRoom.setRequestHeader('Content-Type', 'application/json');
 
     remarkedXHRRoom.onload = function () {
       try {
+        if (!remarkedXHRRoom.response || !['success', 'error'].includes(remarkedXHRRoom.response.status)) {
+          reserveResponseMissing();
+          return;
+        }
+        reserveRequestPending = false;
+        if (remarkedXHRRoom.response.status === 'error') {
+          // Every definite rejection permits correction and a new user submission.
+          remarkedPrimaryWidget.querySelector('.remarked-primary-widget__submit').setAttribute('data-disabled', 'false');
+        }
         let localCode = remarkedXHRRoom.response.local_code ? remarkedXHRRoom.response.local_code : 0;
         endPreloader();
         if (remarkedXHRRoom.response.status == "error" && ['Tables are not free', 'Can not find or free table'].includes(remarkedXHRRoom.response.message)) {
+          remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-input').value = '';
+          getTimes();
+          showReserveNotice('Это время уже занято. Выберите другое время и отправьте заявку снова.');
           remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-notice').style.opacity = 1;
           remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times-notice').textContent = "Выберите другое время";
           return false;
@@ -3878,18 +3988,37 @@ function widgetArea(params) {
           remarkedPrimaryWidget.querySelector('.remarked-primary-widget__submit').setAttribute('data-disabled', 'false');
         }
       } catch (error) {
-        console.error(error);
-        endPreloader();
-        alert('Попробуйте еще раз');
-        //remarkedPrimaryWidgetWrap.classList.add('remarked-primary-widget--success');
+        if (remarkedXHRRoom.response?.status === 'success') {
+          // A rendering failure must never invite a duplicate of a confirmed booking.
+          reserveRequestPending = false;
+          endPreloader();
+          remarkedPrimaryWidgetWrap.classList.add('remarked-primary-widget--success');
+          showReserveNotice('Заявка принята. Ресторан свяжется с вами для подтверждения.');
+        } else if (remarkedXHRRoom.response?.status === 'error') {
+          reserveRequestPending = false;
+          endPreloader();
+          remarkedPrimaryWidget.querySelector('.remarked-primary-widget__submit').setAttribute('data-disabled', 'false');
+          showReserveNotice('Сервис отклонил заявку. Проверьте данные или свяжитесь с рестораном: +7 (925) 447-73-17.');
+        } else {
+          reserveResponseMissing();
+        }
       }
 
     }
+
+    remarkedXHRRoom.onerror = reserveResponseMissing;
+    remarkedXHRRoom.ontimeout = reserveResponseMissing;
+    remarkedXHRRoom.onabort = reserveResponseMissing;
 
     remarkedXHRRoom.send(remarkedBodyRoomsJSON);
   }
 
   function remarkedPrimaryWidgetReset() {
+    // Preserve an in-flight/uncertain submission across close and reopen.
+    if (reserveRequestPending || reserveOutcomeUncertain) return;
+    remarkedTimesRequest++;
+    endPreloader();
+    remarkedPrimaryWidget.querySelector('.remarked-primary-widget__reserve-notice')?.remove();
     if (remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times').classList.contains('remarked-primary-widget__times--active')) {
       remarkedPrimaryWidget.querySelector('.remarked-primary-widget__times').classList.remove('remarked-primary-widget__times--active');
     }
@@ -3924,6 +4053,7 @@ function widgetArea(params) {
     if (birthdayInput.getAttribute('style')) {
       birthdayInput.removeAttribute('style');
     }
+    options.picker.setDate();
     remarkedPrimaryWidgetWrap.querySelector('.remarked-primary-widget__date-select').value = "";
     if (options.defaultDate) {
       remarkedPrimaryWidgetWrap.querySelector('.remarked-primary-widget__date-select').value = options.defaultDate;
