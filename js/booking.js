@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let ready = false;
   try {
     if (typeof window.widgetArea === 'function') {
-      window.widgetArea({ booking: [{name:'Pasta на Солянке',point:447091}], button:'[href="#openReMarkedWidget"]',email:true,phoneMask:true,rangeSlotsTime:true,blockedOpenTime:true,blockedAutoLanding:true,utmSourceToReserveSource:true,errorColor:'red',linkPolicy:'https://remarked.ru/widget/new/css/privancy.html',qtyMax:10 });
+      window.widgetArea({ booking: [{name:'Pasta на Солянке',point:447091}], button:'[href="#openReMarkedWidget"]',email:true,phoneMask:true,rangeSlotsTime:true,blockedOpenTime:true,blockedAutoLanding:true,utmSourceToReserveSource:true,errorColor:'red',showErrorNoticeValidate:true,linkPolicy:'https://remarked.ru/widget/new/css/privancy.html',qtyMax:10 });
       ready = true;
     }
   } catch (error) { console.error('Booking widget could not initialize', error); }
