@@ -4,6 +4,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const open = document.getElementById('nav').classList.toggle('open');
     toggle.setAttribute('aria-expanded', String(open));
   }); }
+  // Keep analytics isolated: a blocked counter must never break reservations.
+  const counterId = 98354294;
+  try {
+  if (typeof window.ym !== 'function') {
+    window.ym = function () { (window.ym.a = window.ym.a || []).push(arguments); };
+    window.ym.l = Date.now();
+    const tag = document.createElement('script');
+    tag.async = true;
+    tag.src = 'https://mc.yandex.ru/metrika/tag.js';
+    document.head.appendChild(tag);
+  }
+  window.ym(counterId, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true });
+  } catch (_) { /* Analytics must not prevent the widget from initializing. */ }
+  const trackGoal = name => {
+    try { window.ym(counterId, 'reachGoal', name); } catch (_) { /* Booking takes priority. */ }
+  };
+  let bookingOpen = false;
+  let bookingSuccess = false;
+  const bookingAnalytics = {
+    CustomOpenFunction: () => {
+      if (!bookingOpen) trackGoal('remarked_reservation_open');
+      bookingOpen = true;
+    },
+    CustomCloseFunction: () => { bookingOpen = false; },
+    beforeSendReserves: () => { bookingSuccess = false; },
+    successCreateReserve: () => {
+      if (bookingSuccess) return;
+      bookingSuccess = true;
+      trackGoal('remarked_reservation_success');
+    }
+  };
   let ready = false;
   try {
     if (typeof window.widgetArea === 'function') {
@@ -12,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (referrerPolicy?.content.trim().toLowerCase() === 'no-referrer') {
         referrerPolicy.content = 'strict-origin';
       }
-      window.widgetArea({ booking: [{name:'Pasta на Солянке',point:447091}], button:'[href="#openReMarkedWidget"]',email:true,phoneMask:true,rangeSlotsTime:true,blockedOpenTime:true,blockedAutoLanding:true,utmSourceToReserveSource:true,errorColor:'red',showErrorNoticeValidate:true,linkPolicy:'https://remarked.ru/widget/new/css/privancy.html',qtyMax:10 });
+      window.widgetArea({ ...bookingAnalytics, booking: [{name:'Pasta на Солянке',point:447091}], button:'[href="#openReMarkedWidget"]',email:true,phoneMask:true,rangeSlotsTime:true,blockedOpenTime:true,blockedAutoLanding:true,utmSourceToReserveSource:true,errorColor:'red',showErrorNoticeValidate:true,linkPolicy:'https://remarked.ru/widget/new/css/privancy.html',qtyMax:10 });
       ready = true;
     }
   } catch (error) { console.error('Booking widget could not initialize', error); }
